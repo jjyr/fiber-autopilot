@@ -1,18 +1,14 @@
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use jsonrpsee::{
-    async_client::{Client, ClientBuilder},
     core::{client::ClientT, traits::ToRpcParams},
     http_client::HttpClient,
     rpc_params,
 };
-use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, error::Error, fmt::Display};
+use serde::Deserialize;
 
-use fnn::{
-    fiber::types::Hash256,
-    rpc::{cch::*, channel::*, dev::*, graph::*, info::*, invoice::*, payment::*, peer::*},
-};
+use fnn::rpc::{channel::*, graph::*, info::*, peer::*};
 
+#[derive(Clone)]
 pub struct RPCClient {
     client: HttpClient,
 }
@@ -48,18 +44,18 @@ impl RPCClient {
     //     self.call("cch_get_receive_btc_order", params).await
     // }
 
-    // // Module Channel
-    // pub async fn open_channel(&self, params: OpenChannelParams) -> Result<OpenChannelResult> {
-    //     self.call("channel_open_channel", params).await
-    // }
+    // Module Channel
+    pub async fn open_channel(&self, params: OpenChannelParams) -> Result<OpenChannelResult> {
+        self.call("open_channel", rpc_params!(params)).await
+    }
 
     // pub async fn accept_channel(&self, params: AcceptChannelParams) -> Result<AcceptChannelResult> {
     //     self.call("channel_accept_channel", params).await
     // }
 
-    // pub async fn list_channels(&self, params: ListChannelsParams) -> Result<ListChannelsResult> {
-    //     self.call("channel_list_channels", params).await
-    // }
+    pub async fn list_channels(&self, params: ListChannelsParams) -> Result<ListChannelsResult> {
+        self.call("list_channels", rpc_params!(params)).await
+    }
 
     // pub async fn shutdown_channel(&self, params: ShutdownChannelParams) -> Result<()> {
     //     self.call("channel_shutdown_channel", params).await
@@ -135,10 +131,10 @@ impl RPCClient {
     //     self.call("payment_get_payment", params).await
     // }
 
-    // // Module Peer
-    // pub async fn connect_peer(&self, params: ConnectPeerParams) -> Result<()> {
-    //     self.call("peer_connect_peer", params).await
-    // }
+    // Module Peer
+    pub async fn connect_peer(&self, params: ConnectPeerParams) -> Result<()> {
+        self.call("connect_peer", rpc_params!(params)).await
+    }
 
     // pub async fn disconnect_peer(&self, params: DisconnectPeerParams) -> Result<()> {
     //     self.call("peer_disconnect_peer", params).await

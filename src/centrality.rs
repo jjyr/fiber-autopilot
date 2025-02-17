@@ -43,21 +43,23 @@ impl BetweennessCentrality {
 
         let mut centrality = vec![0f64; graph.nodes().len()];
 
-        // Track min and max value
-        let mut min = 0.0;
-        let mut max = 0.0;
-
         for task in tasks {
             let p = task.await?;
             debug_assert_eq!(p.len(), graph.nodes().len(), "partial len");
             for (n_idx, c) in p.into_iter().enumerate() {
                 centrality[n_idx] += c;
-                if c < min {
-                    min = c;
-                }
-                if c > max {
-                    max = c;
-                }
+            }
+        }
+
+        // Track min and max value
+        let mut min = 0.0;
+        let mut max = 0.0;
+        for v in centrality.iter().cloned() {
+            if v < min {
+                min = v;
+            }
+            if v > max {
+                max = v;
             }
         }
 

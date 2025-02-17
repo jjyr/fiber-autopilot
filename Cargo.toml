@@ -18,3 +18,4 @@ env_logger = "0.11.6"
 jsonrpsee = { version = "0.24.8", features = ["async-client", "client-core", "http-client"] }
 log = "0.4.25"
 rand = "0.9.0"
+serde_with = { version = "3.12.0", features = ["base64", "macros"] }

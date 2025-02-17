@@ -4,6 +4,7 @@ use fnn::{
     fiber::types::Pubkey,
     rpc::graph::{ChannelInfo, NodeInfo},
 };
+use rand::seq::IndexedRandom;
 
 pub struct Graph {
     nodes: Vec<NodeInfo>,
@@ -37,7 +38,7 @@ impl Graph {
 /// Compuate adjacent nodes
 fn compute_edges(nodes: &[NodeInfo], channels: &[ChannelInfo]) -> Vec<Vec<usize>> {
     // node pubkey to index map
-    let node_key_to_index: HashMap<Pubkey, usize> = nodes
+    let node_to_idx: HashMap<Pubkey, usize> = nodes
         .iter()
         .enumerate()
         .map(|(index, node)| (node.node_id, index))
@@ -46,12 +47,30 @@ fn compute_edges(nodes: &[NodeInfo], channels: &[ChannelInfo]) -> Vec<Vec<usize>
     let mut node_channels: Vec<Vec<usize>> = vec![Vec::new(); nodes.len()];
 
     // build node channels
-    for (c_idx, c) in channels.iter().enumerate() {
+    let mut skip_channel_num = 0;
+    'channel: for (c_idx, c) in channels.iter().enumerate() {
         for n in [&c.node1, &c.node2] {
-            let n_idx = node_key_to_index[n];
+            if !node_to_idx.contains_key(n) {
+                log::trace!(
+                    "Skiping missing peer {:?} channel {}",
+                    n,
+                    &c.channel_outpoint
+                );
+                skip_channel_num += 1;
+                continue 'channel;
+            }
+        }
+        for n in [&c.node1, &c.node2] {
+            let n_idx = node_to_idx[n];
             node_channels[n_idx].push(c_idx);
         }
     }
+    log::warn!(
+        "Total channel {} , valid {} skipped {}",
+        channels.len(),
+        channels.len() - skip_channel_num,
+        skip_channel_num,
+    );
 
     // node index to adjacent nodes map
     let mut edges = vec![Vec::new(); nodes.len()];
@@ -60,8 +79,9 @@ fn compute_edges(nodes: &[NodeInfo], channels: &[ChannelInfo]) -> Vec<Vec<usize>
         // iter node's channels
         for c_idx in &node_channels[n_idx] {
             let c = &channels[*c_idx];
-            let n1 = node_key_to_index[&c.node1];
-            let n2 = node_key_to_index[&c.node2];
+
+            let n1 = node_to_idx[&c.node1];
+            let n2 = node_to_idx[&c.node2];
             // push adjacent node v
             let v_idx = if n_idx == n1 { n2 } else { n1 };
             edges[n_idx].push(v_idx);

@@ -1,1 +1,12 @@
 url = "http://127.0.0.1:8227"
+[agent]
+# Total available funds
+# 620000000000
+available_funds = "0x905AE13800"
+interval = 15
+max_chan_num = 100
+max_pending = 20
+# 6200000000
+min_chan_funds = "0x1718C7E00"
+# 6200000000
+max_chan_funds = "0x1718C7E00"
