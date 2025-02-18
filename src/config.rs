@@ -1,10 +1,11 @@
-use fnn::fiber::serde_utils::U128Hex;
+use fnn::{fiber::serde_utils::U128Hex, rpc::peer::MultiAddr};
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 
 #[derive(Serialize, Deserialize)]
 pub struct Config {
     pub url: String,
+    pub external_nodes: Vec<MultiAddr>,
     pub agent: AgentConfig,
 }
 

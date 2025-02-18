@@ -48,7 +48,7 @@ impl Agent {
         log::info!(
             "Node info: {:?} {:?}",
             node_info.node_name,
-            node_info.node_id
+            PeerId::from_public_key(&node_info.node_id.into())
         );
 
         let self_id = node_info.node_id;
@@ -90,7 +90,12 @@ impl Agent {
             })
             .await?;
         for n in &nodes.nodes {
-            log::trace!("peer {:?}-{} {}", n.node_id, n.node_name, n.timestamp);
+            log::trace!(
+                "Peer {:?}-{} {}",
+                PeerId::from_public_key(&n.node_id.into()),
+                n.node_name,
+                n.timestamp
+            );
         }
         let channels = self
             .client
@@ -101,7 +106,7 @@ impl Agent {
             .await?;
         for c in &channels.channels {
             log::trace!(
-                "channel {:?}-{} {}",
+                "Channel {:?} {} {}",
                 c.channel_outpoint,
                 c.capacity,
                 c.created_timestamp
@@ -118,7 +123,7 @@ impl Agent {
 
         for c in &local_channels.channels {
             log::trace!(
-                "local channel {:?}-{} {}",
+                "Local channel {:?} {} {}",
                 c.channel_outpoint,
                 c.peer_id,
                 c.channel_id
@@ -197,14 +202,15 @@ impl Agent {
 
         for node in graph.nodes() {
             // skip ignored
-            if ignored.contains(&PeerId::from_public_key(&node.node_id.into())) {
-                log::trace!("Skiping node {:?}", node.node_id);
+            let peer = PeerId::from_public_key(&node.node_id.into());
+            if ignored.contains(&peer) {
+                log::trace!("Skiping node {peer:?}");
                 continue;
             }
 
             // skip unknown addresses
             if node.addresses.is_empty() {
-                log::trace!("Skiping node {:?} has no known addresses", node.node_id);
+                log::trace!("Skiping node {peer:?} has no known addresses");
                 continue;
             }
 
@@ -223,7 +229,8 @@ impl Agent {
                 .collect();
         log::debug!("Get {} scores", scores.len());
         for (n, s) in scores.iter() {
-            log::trace!("{n:?} {s}");
+            let peer = PeerId::from_public_key(&(*n).into());
+            log::trace!("{peer:?} {s}");
         }
         let mut candidates: Vec<OpenChannelCmd> = Vec::default();
 
@@ -248,7 +255,13 @@ impl Agent {
             candidates.push(cmd);
         }
 
-        log::debug!("Get {} candidates, query num {}", candidates.len(), num);
+        log::debug!(
+            "Get {} candidates, query num {} pending {}/{}",
+            candidates.len(),
+            num,
+            self.pending.len(),
+            self.config.max_pending
+        );
 
         let mut handles = Vec::default();
 

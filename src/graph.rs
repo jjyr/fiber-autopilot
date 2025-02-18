@@ -2,7 +2,10 @@ use std::collections::HashMap;
 
 use fnn::{
     fiber::types::Pubkey,
-    rpc::graph::{ChannelInfo, NodeInfo},
+    rpc::{
+        graph::{ChannelInfo, NodeInfo},
+        peer::PeerId,
+    },
 };
 
 pub struct Graph {
@@ -50,9 +53,10 @@ fn compute_edges(nodes: &[NodeInfo], channels: &[ChannelInfo]) -> Vec<Vec<usize>
     'channel: for (c_idx, c) in channels.iter().enumerate() {
         for n in [&c.node1, &c.node2] {
             if !node_to_idx.contains_key(n) {
+                let peer = PeerId::from_public_key(&(*n).into());
                 log::trace!(
                     "Skiping missing peer {:?} channel {}",
-                    n,
+                    peer,
                     &c.channel_outpoint
                 );
                 skip_channel_num += 1;

@@ -8,6 +8,7 @@ mod utils;
 use anyhow::Result;
 use clap::Parser;
 use config::Config;
+use fnn::rpc::peer::ConnectPeerParams;
 use rpc::client::RPCClient;
 use std::fs;
 
@@ -38,6 +39,23 @@ async fn main() -> Result<()> {
     let data = fs::read_to_string(&args.config)?;
     let config: Config = toml::from_str(&data)?;
     let client = RPCClient::new(&config.url);
+    log::info!("Found {} external nodes", config.external_nodes.len());
+    for addr in config.external_nodes {
+        let result = client
+            .connect_peer(ConnectPeerParams {
+                address: addr.clone(),
+                save: Some(true),
+            })
+            .await;
+        match result {
+            Ok(_) => {
+                log::info!("Connect to external node {addr:?}");
+            }
+            Err(err) => {
+                log::error!("Fail to connect external node {addr:?} {err:?}");
+            }
+        }
+    }
     let agent = agent::Agent::setup(config.agent, client).await?;
     agent.run().await;
 
