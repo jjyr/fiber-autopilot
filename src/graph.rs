@@ -4,7 +4,6 @@ use fnn::{
     fiber::types::Pubkey,
     rpc::graph::{ChannelInfo, NodeInfo},
 };
-use rand::seq::IndexedRandom;
 
 pub struct Graph {
     nodes: Vec<NodeInfo>,

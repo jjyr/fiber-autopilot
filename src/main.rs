@@ -1,7 +1,7 @@
 mod agent;
-mod centrality;
 mod config;
 mod graph;
+mod heuristics;
 mod rpc;
 mod utils;
 

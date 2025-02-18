@@ -6,20 +6,15 @@ use std::{
 
 use anyhow::{anyhow, bail, Context, Result};
 use fnn::{
-    fiber::{
-        serde_utils::U128Hex,
-        types::{Hash256, Pubkey},
-    },
+    fiber::types::{Hash256, Pubkey},
     rpc::{
         channel::{Channel, ListChannelsParams, OpenChannelParams},
         graph::*,
         peer::{ConnectPeerParams, MultiAddr, PeerId},
     },
 };
-use serde::*;
-use serde_with::serde_as;
 
-use crate::{centrality::get_node_scores, graph::Graph, rpc::client::RPCClient, utils::choice_n};
+use crate::{config::AgentConfig, graph::Graph, rpc::client::RPCClient, utils::choice_n};
 
 #[derive(Debug, Clone)]
 struct OpenChannelCmd {
@@ -28,38 +23,17 @@ struct OpenChannelCmd {
     addresses: Vec<MultiAddr>,
 }
 
-#[serde_as]
-#[derive(Serialize, Deserialize, Debug)]
-pub struct Config {
-    /// TODO: Fiber should provide a query RPC
-    /// Available Funds
-    #[serde_as(as = "U128Hex")]
-    pub available_funds: u128,
-    /// Max channels
-    pub max_chan_num: usize,
-    /// Interval seconds
-    pub interval: u64,
-    /// Max pending channels
-    pub max_pending: usize,
-    /// Minimal chan size
-    #[serde_as(as = "U128Hex")]
-    pub min_chan_funds: u128,
-    /// Max chan size
-    #[serde_as(as = "U128Hex")]
-    pub max_chan_funds: u128,
-}
-
 /// Autopilot agent
 pub struct Agent {
     /// The id of the autopilot node
     pub self_id: Pubkey,
-    pub config: Config,
-    pub pending: HashSet<Pubkey>,
+    pub config: AgentConfig,
+    pub pending: HashSet<PeerId>,
     pub client: RPCClient,
 }
 
 impl Agent {
-    pub fn new(self_id: Pubkey, config: Config, client: RPCClient) -> Self {
+    pub fn new(self_id: Pubkey, config: AgentConfig, client: RPCClient) -> Self {
         Agent {
             self_id,
             config,
@@ -68,7 +42,7 @@ impl Agent {
         }
     }
 
-    pub async fn setup(config: Config, client: RPCClient) -> Result<Self> {
+    pub async fn setup(config: AgentConfig, client: RPCClient) -> Result<Self> {
         let node_info = client.node_info().await?;
 
         log::info!(
@@ -83,6 +57,21 @@ impl Agent {
 
     pub async fn run(mut self) {
         log::info!("Start autopilot agent");
+
+        let heuristics_weight = self
+            .config
+            .heuristics
+            .heuristics
+            .iter()
+            .map(|h| h.weight)
+            .sum::<f32>();
+        if heuristics_weight != 1.0 {
+            log::warn!(
+                "Total heuristics weight is {} expected 1.0",
+                heuristics_weight
+            );
+        }
+
         loop {
             if let Err(err) = self.run_once().await {
                 log::error!("Run once {err:?}");
@@ -161,6 +150,19 @@ impl Agent {
         graph: Arc<Graph>,
         local_channels: Vec<Channel>,
     ) -> Result<()> {
+        // check connected pending channels
+        for c in local_channels.iter() {
+            if self.pending.remove(&c.peer_id) {
+                log::info!(
+                    "Successfully open channel {:?} {:?} with {:?} funds {}",
+                    c.channel_id,
+                    c.channel_outpoint,
+                    c.peer_id,
+                    c.local_balance
+                );
+            }
+        }
+
         let chan_funds = self.config.max_chan_funds.min(available_funds);
         if chan_funds < self.config.min_chan_funds {
             bail!(
@@ -180,17 +182,13 @@ impl Agent {
         }
 
         // open channels up to max_pending
+        // TODO: We should stop open channel and remove peer from pending after timeout
         let num = num.min(self.config.max_pending - self.pending.len());
 
         let mut ignored: HashSet<PeerId> = local_channels
             .into_iter()
             .map(|c| c.peer_id)
-            .chain(
-                self.pending
-                    .clone()
-                    .into_iter()
-                    .map(|pk| PeerId::from_public_key(&pk.into())),
-            )
+            .chain(self.pending.clone().into_iter())
             .collect();
         ignored.insert(PeerId::from_public_key(&self.self_id.into()));
 
@@ -218,8 +216,15 @@ impl Agent {
             nodes.insert(node.node_id);
         }
 
-        let scores: Vec<(Pubkey, f64)> = get_node_scores(graph, nodes).await?.into_iter().collect();
+        let scores: Vec<(Pubkey, f64)> =
+            crate::heuristics::get_node_scores(&self.config.heuristics, graph, nodes)
+                .await?
+                .into_iter()
+                .collect();
         log::debug!("Get {} scores", scores.len());
+        for (n, s) in scores.iter() {
+            log::trace!("{n:?} {s}");
+        }
         let mut candidates: Vec<OpenChannelCmd> = Vec::default();
 
         for (node_id, _) in choice_n(scores, num) {
@@ -249,18 +254,18 @@ impl Agent {
 
         // start cmd
         for cmd in candidates {
-            if self.pending.contains(&cmd.node_id) {
+            let peer = PeerId::from_public_key(&cmd.node_id.into());
+            if self.pending.contains(&peer) {
                 log::info!("Skipping pending connection {:?}", cmd.node_id);
                 continue;
             }
 
-            self.pending.insert(cmd.node_id);
+            self.pending.insert(peer);
 
             let handle = tokio::spawn(Self::execute(cmd.clone(), self.client.clone()));
             handles.push((cmd, handle));
         }
 
-        // TODO: Try to remove the blocking here, we should be able to handle new open_channels
         // resolve handles
         for (cmd, handle) in handles {
             let OpenChannelCmd {
@@ -271,35 +276,18 @@ impl Agent {
             let peer = PeerId::from_public_key(&node_id.into());
             match handle.await {
                 Ok(Ok(temp_channel_id)) => {
-                    log::info!("Open channel {temp_channel_id:?} with {peer:?} {addresses:?} funds {funds}");
-                    self.pending.remove(&cmd.node_id);
+                    log::info!("Initial open channel {temp_channel_id:?} with {peer:?} {addresses:?} funds {funds}");
+                    // We must wait for peer to accept the channel
                 }
                 Ok(Err(err)) => {
                     log::error!("Failed to open channel {peer:?} {addresses:?} {err:?}");
-                    self.pending.remove(&cmd.node_id);
+                    self.pending.remove(&peer);
                 }
                 Err(err) => {
                     log::error!("Failed to execute {peer:?} {addresses:?} {err:?}");
-                    self.pending.remove(&cmd.node_id);
+                    self.pending.remove(&peer);
                 }
             }
-        }
-
-        let local_channels = self
-            .client
-            .list_channels(ListChannelsParams {
-                peer_id: None,
-                include_closed: Some(true),
-            })
-            .await?;
-
-        for c in &local_channels.channels {
-            log::trace!(
-                "local channel {:?}-{} {}",
-                c.channel_outpoint,
-                c.peer_id,
-                c.channel_id
-            );
         }
 
         Ok(())

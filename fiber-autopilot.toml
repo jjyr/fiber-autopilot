@@ -10,3 +10,12 @@ max_pending = 20
 min_chan_funds = "0x1718C7E00"
 # 6200000000
 max_chan_funds = "0x1718C7E00"
+[[agent.heuristics]]
+heuristic = "Centrality"
+weight = 0.8
+[[agent.heuristics]]
+heuristic = "Richness"
+weight = 0.1
+[[agent.heuristics]]
+heuristic = "Random"
+weight = 0.1
