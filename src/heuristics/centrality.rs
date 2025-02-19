@@ -7,26 +7,29 @@ use std::{
     sync::Arc,
 };
 
-use fnn::{fiber::types::Pubkey, rpc::graph::NodeInfo};
+use fnn::rpc::{graph::NodeInfo, peer::PeerId};
 
 use crate::graph::Graph;
 use anyhow::Result;
 
 pub async fn get_node_scores(
     graph: Arc<Graph>,
-    nodes: HashSet<Pubkey>,
-) -> Result<HashMap<Pubkey, f64>> {
+    nodes: HashSet<PeerId>,
+) -> Result<HashMap<PeerId, f64>> {
     let bc = BetweennessCentrality::build(graph).await?;
     let centrality = bc.get(true);
     let scores = nodes
         .into_iter()
-        .map(|id| (id, centrality.get(&id).cloned().expect("missing score")))
+        .map(|peer| {
+            let c = centrality.get(&peer).cloned().expect("missing score");
+            (peer, c)
+        })
         .collect();
     Ok(scores)
 }
 
 pub struct BetweennessCentrality {
-    centrality: HashMap<Pubkey, f64>,
+    centrality: HashMap<PeerId, f64>,
     min: f64,
     max: f64,
 }
@@ -69,8 +72,9 @@ impl BetweennessCentrality {
             .into_iter()
             .enumerate()
             .map(|(n_idx, c)| {
-                let id = graph.nodes()[n_idx].node_id;
-                (id, c * 0.5)
+                let node_id = graph.nodes()[n_idx].node_id;
+                let peer = PeerId::from_public_key(&node_id.into());
+                (peer, c * 0.5)
             })
             .collect();
         Ok(Self {
@@ -81,14 +85,14 @@ impl BetweennessCentrality {
     }
 
     /// Normalize centrality to 0.0 ~ 1.0 if normalize is passed
-    pub fn get(&self, normalize: bool) -> HashMap<Pubkey, f64> {
+    pub fn get(&self, normalize: bool) -> HashMap<PeerId, f64> {
         assert!(self.max - self.min > 0.0);
         let z = 1.0 / (self.max - self.min);
 
         let mut centrality = HashMap::with_capacity(self.centrality.len());
 
         for (k, v) in self.centrality.iter() {
-            let k = *k;
+            let k = k.to_owned();
             let mut v = *v;
             if normalize {
                 v = (v - self.min) * z;

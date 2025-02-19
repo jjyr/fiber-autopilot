@@ -1,3 +1,6 @@
+use std::str::FromStr;
+
+use fnn::rpc::peer::{MultiAddr, PeerId};
 use rand::distr::{weighted::WeightedIndex, Distribution};
 
 pub fn choice_n<T: Clone>(items: Vec<(T, f64)>, n: usize) -> Vec<(T, f64)> {
@@ -15,4 +18,12 @@ pub fn choice_n<T: Clone>(items: Vec<(T, f64)>, n: usize) -> Vec<(T, f64)> {
         samples.push(items[i].clone());
     }
     samples
+}
+
+pub fn get_peer_id_from_addr(addr: &MultiAddr) -> Option<PeerId> {
+    let addr_str = addr.to_string();
+    let parts: Vec<&str> = addr_str.split("/").collect();
+    let index = parts.iter().position(|s| *s == "p2p")?;
+    let p2p_str = parts.get(index + 1)?;
+    PeerId::from_str(p2p_str).ok()
 }

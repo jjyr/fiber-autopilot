@@ -14,11 +14,16 @@ use fnn::{
     },
 };
 
-use crate::{config::AgentConfig, graph::Graph, rpc::client::RPCClient, utils::choice_n};
+use crate::{
+    config::AgentConfig,
+    graph::Graph,
+    rpc::client::RPCClient,
+    utils::{choice_n, get_peer_id_from_addr},
+};
 
 #[derive(Debug, Clone)]
 struct OpenChannelCmd {
-    node_id: Pubkey,
+    peer: PeerId,
     funds: u128,
     addresses: Vec<MultiAddr>,
 }
@@ -197,8 +202,8 @@ impl Agent {
             .collect();
         ignored.insert(PeerId::from_public_key(&self.self_id.into()));
 
-        let mut nodes: HashSet<Pubkey> = HashSet::default();
-        let mut addresses: HashMap<Pubkey, Vec<MultiAddr>> = HashMap::default();
+        let mut nodes: HashSet<PeerId> = HashSet::default();
+        let mut addresses: HashMap<PeerId, Vec<MultiAddr>> = HashMap::default();
 
         for node in graph.nodes() {
             // skip ignored
@@ -216,25 +221,37 @@ impl Agent {
 
             // store addresses
             addresses
-                .entry(node.node_id)
+                .entry(peer.clone())
                 .or_default()
                 .extend(node.addresses.clone());
-            nodes.insert(node.node_id);
+            nodes.insert(peer);
         }
 
-        let scores: Vec<(Pubkey, f64)> =
+        let mut scores: Vec<(PeerId, f64)> =
             crate::heuristics::get_node_scores(&self.config.heuristics, graph, nodes)
                 .await?
                 .into_iter()
                 .collect();
+
+        // Insert external nodes scores
+        for addr in &self.config.external_nodes {
+            let Some(peer) = get_peer_id_from_addr(addr) else {
+                log::warn!("Can't find peer id from external address {addr:?}");
+                continue;
+            };
+            if !ignored.contains(&peer) {
+                scores.push((peer.clone(), 1.0));
+                addresses.insert(peer, vec![addr.to_owned()]);
+            }
+        }
+
         log::debug!("Get {} scores", scores.len());
-        for (n, s) in scores.iter() {
-            let peer = PeerId::from_public_key(&(*n).into());
+        for (peer, s) in scores.iter() {
             log::trace!("{peer:?} {s}");
         }
         let mut candidates: Vec<OpenChannelCmd> = Vec::default();
 
-        for (node_id, _) in choice_n(scores, num) {
+        for (peer, _) in choice_n(scores, num) {
             let chan_funds = available_funds.min(chan_funds);
             available_funds -= chan_funds;
 
@@ -247,10 +264,11 @@ impl Agent {
                 break;
             }
 
+            let addresses = addresses[&peer].clone();
             let cmd = OpenChannelCmd {
-                node_id,
+                peer,
                 funds: chan_funds,
-                addresses: addresses[&node_id].clone(),
+                addresses,
             };
             candidates.push(cmd);
         }
@@ -267,9 +285,9 @@ impl Agent {
 
         // start cmd
         for cmd in candidates {
-            let peer = PeerId::from_public_key(&cmd.node_id.into());
+            let peer = cmd.peer.clone();
             if self.pending.contains(&peer) {
-                log::info!("Skipping pending connection {:?}", cmd.node_id);
+                log::info!("Skipping pending connection {:?}", peer);
                 continue;
             }
 
@@ -282,11 +300,10 @@ impl Agent {
         // resolve handles
         for (cmd, handle) in handles {
             let OpenChannelCmd {
-                node_id,
+                peer,
                 funds,
                 addresses,
             } = cmd;
-            let peer = PeerId::from_public_key(&node_id.into());
             match handle.await {
                 Ok(Ok(temp_channel_id)) => {
                     log::info!("Initial open channel {temp_channel_id:?} with {peer:?} {addresses:?} funds {funds}");
@@ -308,7 +325,7 @@ impl Agent {
 
     async fn execute(cmd: OpenChannelCmd, client: RPCClient) -> Result<Hash256> {
         let OpenChannelCmd {
-            node_id,
+            peer,
             funds,
             addresses,
         } = cmd;
@@ -327,9 +344,8 @@ impl Agent {
         // wait
         tokio::time::sleep(Duration::from_secs(3)).await;
 
-        let peer_id = PeerId::from_public_key(&node_id.into());
         let params = OpenChannelParams {
-            peer_id,
+            peer_id: peer,
             funding_amount: funds,
             commitment_fee_rate: None,
             public: None,

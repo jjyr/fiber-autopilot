@@ -1,6 +1,7 @@
 url = "http://127.0.0.1:8227"
-external_nodes = []
 [agent]
+# Autopilot agent gives external node with highest scores
+external_nodes = []
 # Total available funds
 # 10000 CKB
 available_funds = "0xE8D4A51000"

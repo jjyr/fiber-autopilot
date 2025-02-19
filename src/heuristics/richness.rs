@@ -4,7 +4,7 @@ use std::{
 };
 
 use anyhow::Result;
-use fnn::fiber::types::Pubkey;
+use fnn::{fiber::types::Pubkey, rpc::peer::PeerId};
 
 use crate::graph::Graph;
 
@@ -13,8 +13,8 @@ const MIN_MEDIAN_CHAN_CAP_FRACTION: u128 = 4;
 
 pub async fn get_node_scores(
     graph: Arc<Graph>,
-    nodes: HashSet<Pubkey>,
-) -> Result<HashMap<Pubkey, f64>> {
+    nodes: HashSet<PeerId>,
+) -> Result<HashMap<PeerId, f64>> {
     // get median
     let mut chan_caps = Vec::default();
     for c in graph.channels() {
@@ -27,13 +27,14 @@ pub async fn get_node_scores(
         .unwrap_or_default();
 
     // count the number of largest channels for each node
-    let mut node_chan_num: HashMap<Pubkey, i32> = HashMap::default();
+    let mut node_chan_num: HashMap<PeerId, i32> = HashMap::default();
     let mut count_chan = |n: Pubkey, neg: bool| {
-        if nodes.contains(&n) {
+        let peer = PeerId::from_public_key(&n.into());
+        if nodes.contains(&peer) {
             if neg {
-                *node_chan_num.entry(n).or_default() -= 1;
+                *node_chan_num.entry(peer).or_default() -= 1;
             } else {
-                *node_chan_num.entry(n).or_default() += 1;
+                *node_chan_num.entry(peer).or_default() += 1;
             }
         }
     };

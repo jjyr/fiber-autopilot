@@ -4,15 +4,15 @@ use std::{
 };
 
 use anyhow::Result;
-use fnn::fiber::types::Pubkey;
+use fnn::rpc::peer::PeerId;
 use rand::Rng;
 
 use crate::graph::Graph;
 
 pub async fn get_node_scores(
     _graph: Arc<Graph>,
-    nodes: HashSet<Pubkey>,
-) -> Result<HashMap<Pubkey, f64>> {
+    nodes: HashSet<PeerId>,
+) -> Result<HashMap<PeerId, f64>> {
     let mut rng = rand::rng();
     let scores = nodes
         .into_iter()
