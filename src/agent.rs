@@ -219,6 +219,15 @@ impl Agent {
                 continue;
             }
 
+            if node.auto_accept_min_ckb_funding_amount as u128 > chan_funds {
+                log::trace!(
+                    "Skiping node {peer:?} require high funding, peer required {} chan_funds {}",
+                    node.auto_accept_min_ckb_funding_amount,
+                    chan_funds
+                );
+                continue;
+            }
+
             // store addresses
             addresses
                 .entry(peer.clone())
