@@ -5,13 +5,14 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0.95"
-ckb-jsonrpc-types = "0.121.0"
-ckb-types = "0.121.0"
+ckb-jsonrpc-types = "0.119.0"
+ckb-types = "0.119.0"
 clap = { version = "4.5.29", features = ["derive"] }
 serde = { version = "1.0.217", features = ["derive"] }
 serde_json = "1.0.138"
 tokio = { version = "1.43.0", features = ["macros", "rt-multi-thread"] }
 toml = "0.8.20"
+# public RPC
 fnn = { git = "https://github.com/jjyr/fiber.git", rev = "120ac811e3da598d7db69a317ed5da9c958c3bbd" }
 ractor = "=0.14.2"
 env_logger = "0.11.6"
@@ -23,3 +24,5 @@ jsonrpsee = { version = "0.24.8", features = [
 log = "0.4.25"
 rand = "0.9.0"
 serde_with = { version = "3.12.0", features = ["base64", "macros"] }
+# async client
+ckb-sdk = { git = "https://github.com/nervosnetwork/ckb-sdk-rust.git", rev = "8adc810d42e2e6b8e7f19feabc16af2aa48a8cb3" }

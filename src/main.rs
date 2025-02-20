@@ -1,13 +1,17 @@
 mod agent;
 mod config;
 mod graph;
+mod graph_source;
 mod heuristics;
 mod rpc;
+mod traits;
 mod utils;
 
 use anyhow::Result;
+use ckb_sdk::CkbRpcAsyncClient;
 use clap::Parser;
 use config::Config;
+use graph_source::rpc::RPCGraphSource;
 use rpc::client::RPCClient;
 use std::fs;
 
@@ -37,8 +41,13 @@ async fn main() -> Result<()> {
 
     let data = fs::read_to_string(&args.config)?;
     let config: Config = toml::from_str(&data)?;
-    let client = RPCClient::new(&config.url);
-    let agent = agent::Agent::setup(config.agent, client).await?;
+    let source = {
+        let fiber_client = RPCClient::new(&config.fiber.url);
+        let ckb_client = CkbRpcAsyncClient::new(&config.ckb.url);
+        RPCGraphSource::new(fiber_client, ckb_client)
+    };
+
+    let agent = agent::Agent::setup(config.agent, source).await?;
     agent.run().await;
 
     Ok(())

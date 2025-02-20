@@ -4,8 +4,19 @@ use serde_with::serde_as;
 
 #[derive(Serialize, Deserialize)]
 pub struct Config {
-    pub url: String,
+    pub fiber: FiberConfig,
+    pub ckb: CkbConfig,
     pub agent: AgentConfig,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct FiberConfig {
+    pub url: String,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct CkbConfig {
+    pub url: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -42,10 +53,6 @@ impl Default for HeuristicConfig {
 pub struct AgentConfig {
     /// Open channals to external nodes without scoring
     pub external_nodes: Vec<MultiAddr>,
-    /// TODO: Fiber should provide a query RPC
-    /// Available Funds
-    #[serde_as(as = "U128Hex")]
-    pub available_funds: u128,
     /// Max channels
     pub max_chan_num: usize,
     /// Interval seconds

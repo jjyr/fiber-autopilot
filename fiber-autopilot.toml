@@ -1,4 +1,7 @@
+[fiber]
 url = "http://127.0.0.1:8227"
+[ckb]
+url = "https://testnet.ckb.dev"
 [agent]
 # Autopilot agent gives external node with highest scores
 external_nodes = []

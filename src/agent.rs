@@ -8,16 +8,15 @@ use anyhow::{anyhow, bail, Context, Result};
 use fnn::{
     fiber::types::{Hash256, Pubkey},
     rpc::{
-        channel::{Channel, ListChannelsParams, OpenChannelParams},
-        graph::*,
-        peer::{ConnectPeerParams, MultiAddr, PeerId},
+        channel::{Channel, OpenChannelParams},
+        peer::{MultiAddr, PeerId},
     },
 };
 
 use crate::{
     config::AgentConfig,
     graph::Graph,
-    rpc::client::RPCClient,
+    traits::GraphSource,
     utils::{choice_n, get_peer_id_from_addr},
 };
 
@@ -29,26 +28,26 @@ struct OpenChannelCmd {
 }
 
 /// Autopilot agent
-pub struct Agent {
+pub struct Agent<GS> {
     /// The id of the autopilot node
     pub self_id: Pubkey,
     pub config: AgentConfig,
     pub pending: HashSet<PeerId>,
-    pub client: RPCClient,
+    pub source: GS,
 }
 
-impl Agent {
-    pub fn new(self_id: Pubkey, config: AgentConfig, client: RPCClient) -> Self {
+impl<GS: GraphSource + Send + Clone + 'static> Agent<GS> {
+    pub fn new(self_id: Pubkey, config: AgentConfig, source: GS) -> Self {
         Agent {
             self_id,
             config,
             pending: Default::default(),
-            client,
+            source,
         }
     }
 
-    pub async fn setup(config: AgentConfig, client: RPCClient) -> Result<Self> {
-        let node_info = client.node_info().await?;
+    pub async fn setup(config: AgentConfig, source: GS) -> Result<Self> {
+        let node_info = source.node_info().await?;
 
         log::info!(
             "Node info: {:?} {:?}",
@@ -57,7 +56,7 @@ impl Agent {
         );
 
         let self_id = node_info.node_id;
-        Ok(Self::new(self_id, config, client))
+        Ok(Self::new(self_id, config, source))
     }
 
     pub async fn run(mut self) {
@@ -87,14 +86,8 @@ impl Agent {
     }
 
     pub async fn run_once(&mut self) -> Result<()> {
-        let nodes = self
-            .client
-            .graph_nodes(GraphNodesParams {
-                limit: None,
-                after: None,
-            })
-            .await?;
-        for n in &nodes.nodes {
+        let nodes = self.source.graph_nodes().await?;
+        for n in &nodes {
             log::trace!(
                 "Peer {:?}-{} {}",
                 PeerId::from_public_key(&n.node_id.into()),
@@ -102,14 +95,8 @@ impl Agent {
                 n.timestamp
             );
         }
-        let channels = self
-            .client
-            .graph_channels(GraphChannelsParams {
-                limit: None,
-                after: None,
-            })
-            .await?;
-        for c in &channels.channels {
+        let channels = self.source.graph_channels().await?;
+        for c in &channels {
             log::trace!(
                 "Channel {:?} {} {}",
                 c.channel_outpoint,
@@ -118,15 +105,9 @@ impl Agent {
             );
         }
 
-        let local_channels = self
-            .client
-            .list_channels(ListChannelsParams {
-                peer_id: None,
-                include_closed: Some(false),
-            })
-            .await?;
+        let local_channels = self.source.local_channels().await?;
 
-        for c in &local_channels.channels {
+        for c in &local_channels {
             log::trace!(
                 "Local channel {:?} {} {}",
                 c.channel_outpoint,
@@ -137,19 +118,26 @@ impl Agent {
 
         log::info!(
             "Query {} nodes {} channels {} locals from the network",
-            nodes.nodes.len(),
-            channels.channels.len(),
-            local_channels.channels.len()
+            nodes.len(),
+            channels.len(),
+            local_channels.len()
         );
-        let graph = Arc::new(Graph::build(nodes.nodes, channels.channels));
+        let graph = Arc::new(Graph::build(nodes, channels));
 
-        let available_funds = self.config.available_funds;
+        // query available funds
+        let self_node = self.source.node_info().await?;
+        let lock = {
+            // TODO: Remove after upgrade ckb_json_type to the same version
+            let v = serde_json::to_value(self_node.default_funding_lock_script)?;
+            serde_json::from_value(v)?
+        };
+        let available_funds = self.source.get_balance(lock).await?;
         let num = (self
             .config
             .max_chan_num
-            .saturating_sub(local_channels.channels.len()))
+            .saturating_sub(local_channels.len()))
         .min(20);
-        self.open_channels(available_funds, num, graph, local_channels.channels)
+        self.open_channels(available_funds, num, graph, local_channels)
             .await
     }
 
@@ -160,6 +148,10 @@ impl Agent {
         graph: Arc<Graph>,
         local_channels: Vec<Channel>,
     ) -> Result<()> {
+        log::info!(
+            "Open channels available_funds {available_funds:?} num {num:?} local channels {} pendings {}",
+            local_channels.len(),self.pending.len()
+        );
         // check connected pending channels
         for c in local_channels.iter() {
             if self.pending.remove(&c.peer_id) {
@@ -302,7 +294,7 @@ impl Agent {
 
             self.pending.insert(peer);
 
-            let handle = tokio::spawn(Self::execute(cmd.clone(), self.client.clone()));
+            let handle = tokio::spawn(Self::execute(cmd.clone(), self.source.clone()));
             handles.push((cmd, handle));
         }
 
@@ -332,7 +324,7 @@ impl Agent {
         Ok(())
     }
 
-    async fn execute(cmd: OpenChannelCmd, client: RPCClient) -> Result<Hash256> {
+    async fn execute(cmd: OpenChannelCmd, source: GS) -> Result<Hash256> {
         let OpenChannelCmd {
             peer,
             funds,
@@ -344,11 +336,7 @@ impl Agent {
             .cloned()
             .ok_or_else(|| anyhow!("No address"))?;
 
-        let params = ConnectPeerParams {
-            address,
-            save: Some(true),
-        };
-        client.connect_peer(params).await.context("connect peer")?;
+        source.connect_peer(address).await.context("connect peer")?;
 
         // wait
         tokio::time::sleep(Duration::from_secs(3)).await;
@@ -368,7 +356,7 @@ impl Agent {
             tlc_fee_proportional_millionths: None,
             tlc_min_value: None,
         };
-        let r = client.open_channel(params).await.context("open channel")?;
-        Ok(r.temporary_channel_id)
+        let temporary_channel_id = source.open_channel(params).await.context("open channel")?;
+        Ok(temporary_channel_id)
     }
 }
