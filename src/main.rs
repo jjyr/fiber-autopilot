@@ -14,6 +14,8 @@ use config::Config;
 use graph_source::rpc::RPCGraphSource;
 use rpc::client::RPCClient;
 use std::fs;
+use tokio::task::JoinSet;
+use tracing::{error, info};
 
 /// This is a simple program to demonstrate clap derive usage
 #[derive(Parser, Debug)]
@@ -32,12 +34,16 @@ struct Args {
     config: String,
 }
 
+fn init_log() {
+    tracing_subscriber::fmt().init();
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
-    env_logger::init();
-    let args = Args::parse();
+    init_log();
 
-    log::info!("Using config file: {}", args.config);
+    let args = Args::parse();
+    info!("Using config file: {}", args.config);
 
     let data = fs::read_to_string(&args.config)?;
     let config: Config = toml::from_str(&data)?;
@@ -47,8 +53,34 @@ async fn main() -> Result<()> {
         RPCGraphSource::new(fiber_client, ckb_client)
     };
 
-    let agent = agent::Agent::setup(config.agent, source).await?;
-    agent.run().await;
+    let handle: JoinSet<_> = config
+        .agents
+        .into_iter()
+        .enumerate()
+        .map(|(index, config)| {
+            let name = format!("agent-{index}");
+            let source = source.clone();
+            tokio::spawn(async {
+                let token = config.token.name().to_string();
+                match agent::Agent::setup(name, config, source).await {
+                    Ok(agent) => {
+                        agent.run().await;
+                    }
+                    Err(err) => {
+                        error!("Failed to setup agent {token} error {err:?}");
+                    }
+                }
+            })
+        })
+        .collect();
+
+    info!("All agents are started {}", handle.len());
+
+    for r in handle.join_all().await {
+        if let Err(err) = r {
+            error!("join error {err:?}");
+        }
+    }
 
     Ok(())
 }

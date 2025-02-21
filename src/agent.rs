@@ -1,5 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
+    fmt::Debug,
     sync::Arc,
     time::Duration,
 };
@@ -13,6 +14,7 @@ use fnn::{
         peer::{MultiAddr, PeerId},
     },
 };
+use tracing::{debug, error, info, instrument, trace, warn};
 
 use crate::{
     config::{AgentConfig, TokenType},
@@ -39,6 +41,7 @@ struct OpenChannelCmd {
 
 /// Autopilot agent
 pub struct Agent<GS> {
+    pub name: String,
     /// The id of the autopilot node
     pub self_id: Pubkey,
     pub config: AgentConfig,
@@ -46,9 +49,19 @@ pub struct Agent<GS> {
     pub source: GS,
 }
 
-impl<GS: GraphSource + Send + Clone + 'static> Agent<GS> {
-    pub fn new(self_id: Pubkey, config: AgentConfig, source: GS) -> Self {
+impl<GS> Debug for Agent<GS> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Agent")
+            .field("name", &self.name)
+            .field("token", &self.config.token.name())
+            .finish()
+    }
+}
+
+impl<GS: GraphSource + Send + Clone + Debug + 'static> Agent<GS> {
+    pub fn new(name: String, self_id: Pubkey, config: AgentConfig, source: GS) -> Self {
         Agent {
+            name,
             self_id,
             config,
             pending: Default::default(),
@@ -56,21 +69,16 @@ impl<GS: GraphSource + Send + Clone + 'static> Agent<GS> {
         }
     }
 
-    pub async fn setup(config: AgentConfig, source: GS) -> Result<Self> {
+    #[instrument]
+    pub async fn setup(name: String, config: AgentConfig, source: GS) -> Result<Self> {
         let node_info = source.node_info().await?;
-
-        log::info!(
-            "Node info: {:?} {:?}",
-            node_info.node_name,
-            PeerId::from_public_key(&node_info.node_id.into())
-        );
-
         let self_id = node_info.node_id;
-        Ok(Self::new(self_id, config, source))
+        Ok(Self::new(name, self_id, config, source))
     }
 
+    #[instrument]
     pub async fn run(mut self) {
-        log::info!("Start autopilot agent");
+        info!("Start autopilot agent");
 
         let heuristics_weight = self
             .config
@@ -80,7 +88,7 @@ impl<GS: GraphSource + Send + Clone + 'static> Agent<GS> {
             .map(|h| h.weight)
             .sum::<f32>();
         if heuristics_weight != 1.0 {
-            log::warn!(
+            warn!(
                 "Total heuristics weight is {} expected 1.0",
                 heuristics_weight
             );
@@ -88,7 +96,7 @@ impl<GS: GraphSource + Send + Clone + 'static> Agent<GS> {
 
         loop {
             if let Err(err) = self.run_once().await {
-                log::error!("Run once {err:?}");
+                error!("Run once {err:?}");
             }
             let interval = Duration::from_secs(self.config.interval);
             tokio::time::sleep(interval).await;
@@ -98,7 +106,7 @@ impl<GS: GraphSource + Send + Clone + 'static> Agent<GS> {
     pub async fn run_once(&mut self) -> Result<()> {
         let nodes = self.source.graph_nodes().await?;
         for n in &nodes {
-            log::trace!(
+            trace!(
                 "Peer {:?}-{} {}",
                 PeerId::from_public_key(&n.node_id.into()),
                 n.node_name,
@@ -107,7 +115,7 @@ impl<GS: GraphSource + Send + Clone + 'static> Agent<GS> {
         }
         let channels = self.source.graph_channels().await?;
         for c in &channels {
-            log::trace!(
+            trace!(
                 "Channel {:?} {} {} {:?}",
                 c.channel_outpoint,
                 c.created_timestamp,
@@ -119,7 +127,7 @@ impl<GS: GraphSource + Send + Clone + 'static> Agent<GS> {
         let local_channels = self.source.local_channels().await?;
 
         for c in &local_channels {
-            log::trace!(
+            trace!(
                 "Local channel {:?} {} {}",
                 c.channel_outpoint,
                 c.peer_id,
@@ -127,7 +135,7 @@ impl<GS: GraphSource + Send + Clone + 'static> Agent<GS> {
             );
         }
 
-        log::info!(
+        info!(
             "Query {} nodes {} channels {} locals from the network",
             nodes.len(),
             channels.len(),
@@ -158,7 +166,7 @@ impl<GS: GraphSource + Send + Clone + 'static> Agent<GS> {
         graph: Arc<Graph>,
         local_channels: Vec<Channel>,
     ) -> Result<()> {
-        log::info!(
+        info!(
             "Open channels token {} available_funds {available_funds:?} num {num:?} local channels {} pendings {}",
             self.config.token.name(),
             local_channels.len(),self.pending.len()
@@ -166,7 +174,7 @@ impl<GS: GraphSource + Send + Clone + 'static> Agent<GS> {
         // check connected pending channels
         for c in local_channels.iter() {
             if self.pending.remove(&c.peer_id) {
-                log::info!(
+                info!(
                     "Successfully open channel {:?} {:?} with {:?} funds {} {}",
                     c.channel_id,
                     c.channel_outpoint,
@@ -188,7 +196,7 @@ impl<GS: GraphSource + Send + Clone + 'static> Agent<GS> {
         }
 
         if self.pending.len() >= self.config.max_pending {
-            log::debug!(
+            debug!(
                 "Stop open connections since we had too many pending channels {} max_pending {}",
                 self.pending.len(),
                 self.config.max_pending
@@ -225,18 +233,18 @@ impl<GS: GraphSource + Send + Clone + 'static> Agent<GS> {
             // skip ignored
             let peer = PeerId::from_public_key(&node.node_id.into());
             if ignored.contains(&peer) {
-                log::trace!("Skiping node {peer:?}");
+                trace!("Skiping node {peer:?}");
                 continue;
             }
 
             // skip unknown addresses
             if node.addresses.is_empty() {
-                log::trace!("Skiping node {peer:?} has no known addresses");
+                trace!("Skiping node {peer:?} has no known addresses");
                 continue;
             }
 
             let Some(min_funding_amount) = get_min_funding_amount(&self.config.token, node) else {
-                log::trace!(
+                trace!(
                     "Skiping node {peer:?} since it does not support funding with {}",
                     self.config.token.name()
                 );
@@ -244,7 +252,7 @@ impl<GS: GraphSource + Send + Clone + 'static> Agent<GS> {
             };
 
             if min_funding_amount > chan_funds {
-                log::trace!(
+                trace!(
                     "Skiping node {peer:?} require high funding, peer required token {} {} chan_funds {}",
                     self.config.token.name(),
                     min_funding_amount,
@@ -270,7 +278,7 @@ impl<GS: GraphSource + Send + Clone + 'static> Agent<GS> {
         // Insert external nodes scores
         for addr in &self.config.external_nodes {
             let Some(peer) = get_peer_id_from_addr(addr) else {
-                log::warn!("Can't find peer id from external address {addr:?}");
+                warn!("Can't find peer id from external address {addr:?}");
                 continue;
             };
             if !ignored.contains(&peer) {
@@ -279,9 +287,9 @@ impl<GS: GraphSource + Send + Clone + 'static> Agent<GS> {
             }
         }
 
-        log::debug!("Get {} scores", scores.len());
+        debug!("Get {} scores", scores.len());
         for (peer, s) in scores.iter() {
-            log::trace!("{peer:?} {s}");
+            trace!("{peer:?} {s}");
         }
         let mut candidates: Vec<OpenChannelCmd> = Vec::default();
 
@@ -290,7 +298,7 @@ impl<GS: GraphSource + Send + Clone + 'static> Agent<GS> {
             available_funds -= chan_funds;
 
             if chan_funds < self.config.min_chan_funds {
-                log::trace!(
+                trace!(
                     "Chan funds too small chan_funds {} required {} {}",
                     chan_funds,
                     self.config.min_chan_funds,
@@ -310,7 +318,7 @@ impl<GS: GraphSource + Send + Clone + 'static> Agent<GS> {
             candidates.push(cmd);
         }
 
-        log::debug!(
+        debug!(
             "Get {} candidates, query num {} pending {}/{}",
             candidates.len(),
             num,
@@ -324,7 +332,7 @@ impl<GS: GraphSource + Send + Clone + 'static> Agent<GS> {
         for cmd in candidates {
             let peer = cmd.peer.clone();
             if self.pending.contains(&peer) {
-                log::info!("Skipping pending connection {:?}", peer);
+                info!("Skipping pending connection {:?}", peer);
                 continue;
             }
 
@@ -344,15 +352,15 @@ impl<GS: GraphSource + Send + Clone + 'static> Agent<GS> {
             } = cmd;
             match handle.await {
                 Ok(Ok(temp_channel_id)) => {
-                    log::info!("Initial open channel {temp_channel_id:?} with {peer:?} {addresses:?} funds {funds} {}",token.name());
+                    info!("Initial open channel {temp_channel_id:?} with {peer:?} {addresses:?} funds {funds} {}",token.name());
                     // We must wait for peer to accept the channel
                 }
                 Ok(Err(err)) => {
-                    log::error!("Failed to open channel {peer:?} {addresses:?} {err:?}");
+                    error!("Failed to open channel {peer:?} {addresses:?} {err:?}");
                     self.pending.remove(&peer);
                 }
                 Err(err) => {
-                    log::error!("Failed to execute {peer:?} {addresses:?} {err:?}");
+                    error!("Failed to execute {peer:?} {addresses:?} {err:?}");
                     self.pending.remove(&peer);
                 }
             }

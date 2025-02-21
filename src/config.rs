@@ -7,7 +7,7 @@ use serde_with::serde_as;
 pub struct Config {
     pub fiber: FiberConfig,
     pub ckb: CkbConfig,
-    pub agent: AgentConfig,
+    pub agents: Vec<AgentConfig>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -20,20 +20,20 @@ pub struct CkbConfig {
     pub url: String,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum Heuristic {
     Random,
     Centrality,
     Richness,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct HeuristicItem {
     pub heuristic: Heuristic,
     pub weight: f32,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct HeuristicConfig {
     pub heuristics: Vec<HeuristicItem>,
 }
@@ -74,7 +74,7 @@ impl TokenType {
 }
 
 #[serde_as]
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct AgentConfig {
     /// Set token type
     pub token: TokenType,

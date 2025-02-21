@@ -2,7 +2,7 @@
 url = "http://127.0.0.1:8227"
 [ckb]
 url = "https://testnet.ckb.dev"
-[agent]
+[[agents]]
 token.type = "Ckb"
 # Autopilot agent gives external node with highest scores
 external_nodes = []
@@ -16,12 +16,12 @@ max_pending = 20
 min_chan_funds = "0x2540BE400"
 # 100 CKB
 max_chan_funds = "0x2540BE400"
-[[agent.heuristics]]
+[[agents.heuristics]]
 heuristic = "Centrality"
 weight = 0.8
-[[agent.heuristics]]
+[[agents.heuristics]]
 heuristic = "Richness"
 weight = 0.1
-[[agent.heuristics]]
+[[agents.heuristics]]
 heuristic = "Random"
 weight = 0.1

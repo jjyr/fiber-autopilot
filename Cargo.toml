@@ -15,14 +15,14 @@ toml = "0.8.20"
 # public RPC
 fnn = { git = "https://github.com/jjyr/fiber.git", rev = "745736da68b38999deae75d40c1fdd291d3b0b61" }
 ractor = "=0.14.2"
-env_logger = "0.11.6"
 jsonrpsee = { version = "0.24.8", features = [
   "async-client",
   "client-core",
   "http-client",
 ] }
-log = "0.4.25"
 rand = "0.9.0"
 serde_with = { version = "3.12.0", features = ["base64", "macros"] }
 # async client
 ckb-sdk = { git = "https://github.com/nervosnetwork/ckb-sdk-rust.git", rev = "8adc810d42e2e6b8e7f19feabc16af2aa48a8cb3" }
+tracing = "0.1.41"
+tracing-subscriber = "0.3.19"

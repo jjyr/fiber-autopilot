@@ -7,6 +7,7 @@ use fnn::{
         peer::PeerId,
     },
 };
+use tracing::{trace, warn};
 
 pub struct Graph {
     nodes: Vec<NodeInfo>,
@@ -54,7 +55,7 @@ fn compute_edges(nodes: &[NodeInfo], channels: &[ChannelInfo]) -> Vec<Vec<usize>
         for n in [&c.node1, &c.node2] {
             if !node_to_idx.contains_key(n) {
                 let peer = PeerId::from_public_key(&(*n).into());
-                log::trace!(
+                trace!(
                     "Skiping missing peer {:?} channel {}",
                     peer,
                     &c.channel_outpoint
@@ -68,7 +69,7 @@ fn compute_edges(nodes: &[NodeInfo], channels: &[ChannelInfo]) -> Vec<Vec<usize>
             node_channels[n_idx].push(c_idx);
         }
     }
-    log::warn!(
+    warn!(
         "Total channel {} , valid {} skipped {}",
         channels.len(),
         channels.len() - skip_channel_num,

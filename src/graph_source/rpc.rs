@@ -1,4 +1,4 @@
-use std::future::Future;
+use std::{fmt::Debug, future::Future};
 
 use anyhow::Result;
 use ckb_jsonrpc_types::Script;
@@ -22,6 +22,12 @@ use crate::{config::TokenType, rpc::client::RPCClient, traits::GraphSource};
 pub struct RPCGraphSource {
     fiber_client: RPCClient,
     ckb_client: CkbRpcAsyncClient,
+}
+
+impl Debug for RPCGraphSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RPCGraphSource").finish()
+    }
 }
 
 impl RPCGraphSource {
