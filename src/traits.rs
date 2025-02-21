@@ -12,6 +12,8 @@ use fnn::{
     },
 };
 
+use crate::config::TokenType;
+
 /// Query source data
 pub trait GraphSource {
     /// Query current fiber node info
@@ -30,5 +32,9 @@ pub trait GraphSource {
         params: OpenChannelParams,
     ) -> impl Future<Output = Result<Hash256>> + Send;
     /// Get Balance of a lock script
-    fn get_balance(&self, lock: Script) -> impl Future<Output = Result<u128>> + Send;
+    fn get_balance(
+        &self,
+        lock: Script,
+        token: TokenType,
+    ) -> impl Future<Output = Result<u128>> + Send;
 }

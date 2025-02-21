@@ -9,21 +9,31 @@ use fnn::{
     fiber::types::{Hash256, Pubkey},
     rpc::{
         channel::{Channel, OpenChannelParams},
+        graph::NodeInfo,
         peer::{MultiAddr, PeerId},
     },
 };
 
 use crate::{
-    config::AgentConfig,
+    config::{AgentConfig, TokenType},
     graph::Graph,
     traits::GraphSource,
     utils::{choice_n, get_peer_id_from_addr},
 };
 
+// TODO: Remove after upgrade ckb_json_type to the same version
+macro_rules! conv {
+    ( $x:expr ) => {{
+        let v = serde_json::to_value($x).expect("conv");
+        serde_json::from_value(v).expect("conv")
+    }};
+}
+
 #[derive(Debug, Clone)]
 struct OpenChannelCmd {
     peer: PeerId,
     funds: u128,
+    token: TokenType,
     addresses: Vec<MultiAddr>,
 }
 
@@ -98,10 +108,11 @@ impl<GS: GraphSource + Send + Clone + 'static> Agent<GS> {
         let channels = self.source.graph_channels().await?;
         for c in &channels {
             log::trace!(
-                "Channel {:?} {} {}",
+                "Channel {:?} {} {} {:?}",
                 c.channel_outpoint,
+                c.created_timestamp,
                 c.capacity,
-                c.created_timestamp
+                c.udt_type_script,
             );
         }
 
@@ -126,12 +137,11 @@ impl<GS: GraphSource + Send + Clone + 'static> Agent<GS> {
 
         // query available funds
         let self_node = self.source.node_info().await?;
-        let lock = {
-            // TODO: Remove after upgrade ckb_json_type to the same version
-            let v = serde_json::to_value(self_node.default_funding_lock_script)?;
-            serde_json::from_value(v)?
-        };
-        let available_funds = self.source.get_balance(lock).await?;
+        let lock = conv!(self_node.default_funding_lock_script);
+        let available_funds = self
+            .source
+            .get_balance(lock, self.config.token.clone())
+            .await?;
         let num = (self
             .config
             .max_chan_num
@@ -149,18 +159,20 @@ impl<GS: GraphSource + Send + Clone + 'static> Agent<GS> {
         local_channels: Vec<Channel>,
     ) -> Result<()> {
         log::info!(
-            "Open channels available_funds {available_funds:?} num {num:?} local channels {} pendings {}",
+            "Open channels token {} available_funds {available_funds:?} num {num:?} local channels {} pendings {}",
+            self.config.token.name(),
             local_channels.len(),self.pending.len()
         );
         // check connected pending channels
         for c in local_channels.iter() {
             if self.pending.remove(&c.peer_id) {
                 log::info!(
-                    "Successfully open channel {:?} {:?} with {:?} funds {}",
+                    "Successfully open channel {:?} {:?} with {:?} funds {} {}",
                     c.channel_id,
                     c.channel_outpoint,
                     c.peer_id,
-                    c.local_balance
+                    c.local_balance,
+                    self.config.token.name()
                 );
             }
         }
@@ -168,7 +180,8 @@ impl<GS: GraphSource + Send + Clone + 'static> Agent<GS> {
         let chan_funds = self.config.max_chan_funds.min(available_funds);
         if chan_funds < self.config.min_chan_funds {
             bail!(
-                "Not enough funds to open channel, available {} required {}",
+                "Not enough funds to open channel, token {} available {} required {}",
+                self.config.token.name(),
                 available_funds,
                 self.config.min_chan_funds
             );
@@ -189,7 +202,18 @@ impl<GS: GraphSource + Send + Clone + 'static> Agent<GS> {
 
         let mut ignored: HashSet<PeerId> = local_channels
             .into_iter()
-            .map(|c| c.peer_id)
+            .filter_map(|c| {
+                // only ignore same token local channels
+                if self
+                    .config
+                    .token
+                    .is_token(c.funding_udt_type_script.map(|s| conv!(s)))
+                {
+                    Some(c.peer_id)
+                } else {
+                    None
+                }
+            })
             .chain(self.pending.clone().into_iter())
             .collect();
         ignored.insert(PeerId::from_public_key(&self.self_id.into()));
@@ -211,11 +235,20 @@ impl<GS: GraphSource + Send + Clone + 'static> Agent<GS> {
                 continue;
             }
 
-            if node.auto_accept_min_ckb_funding_amount as u128 > chan_funds {
+            let Some(min_funding_amount) = get_min_funding_amount(&self.config.token, node) else {
                 log::trace!(
-                    "Skiping node {peer:?} require high funding, peer required {} chan_funds {}",
-                    node.auto_accept_min_ckb_funding_amount,
-                    chan_funds
+                    "Skiping node {peer:?} since it does not support funding with {}",
+                    self.config.token.name()
+                );
+                continue;
+            };
+
+            if min_funding_amount > chan_funds {
+                log::trace!(
+                    "Skiping node {peer:?} require high funding, peer required token {} {} chan_funds {}",
+                    self.config.token.name(),
+                    min_funding_amount,
+                    chan_funds,
                 );
                 continue;
             }
@@ -258,17 +291,20 @@ impl<GS: GraphSource + Send + Clone + 'static> Agent<GS> {
 
             if chan_funds < self.config.min_chan_funds {
                 log::trace!(
-                    "Chan funds too small chan_funds {} required {}",
+                    "Chan funds too small chan_funds {} required {} {}",
                     chan_funds,
-                    self.config.min_chan_funds
+                    self.config.min_chan_funds,
+                    self.config.token.name(),
                 );
                 break;
             }
 
             let addresses = addresses[&peer].clone();
+            let token = self.config.token.clone();
             let cmd = OpenChannelCmd {
                 peer,
                 funds: chan_funds,
+                token,
                 addresses,
             };
             candidates.push(cmd);
@@ -304,10 +340,11 @@ impl<GS: GraphSource + Send + Clone + 'static> Agent<GS> {
                 peer,
                 funds,
                 addresses,
+                token,
             } = cmd;
             match handle.await {
                 Ok(Ok(temp_channel_id)) => {
-                    log::info!("Initial open channel {temp_channel_id:?} with {peer:?} {addresses:?} funds {funds}");
+                    log::info!("Initial open channel {temp_channel_id:?} with {peer:?} {addresses:?} funds {funds} {}",token.name());
                     // We must wait for peer to accept the channel
                 }
                 Ok(Err(err)) => {
@@ -329,6 +366,7 @@ impl<GS: GraphSource + Send + Clone + 'static> Agent<GS> {
             peer,
             funds,
             addresses,
+            token,
         } = cmd;
 
         let address = addresses
@@ -341,14 +379,19 @@ impl<GS: GraphSource + Send + Clone + 'static> Agent<GS> {
         // wait
         tokio::time::sleep(Duration::from_secs(3)).await;
 
+        let funding_udt_type_script = match token {
+            TokenType::Ckb => None,
+            TokenType::Udt { script, .. } => Some(conv!(script)),
+        };
+
         let params = OpenChannelParams {
             peer_id: peer,
             funding_amount: funds,
+            funding_udt_type_script,
             commitment_fee_rate: None,
             public: None,
             funding_fee_rate: None,
             commitment_delay_epoch: None,
-            funding_udt_type_script: None,
             shutdown_script: None,
             max_tlc_value_in_flight: None,
             max_tlc_number_in_flight: None,
@@ -358,5 +401,18 @@ impl<GS: GraphSource + Send + Clone + 'static> Agent<GS> {
         };
         let temporary_channel_id = source.open_channel(params).await.context("open channel")?;
         Ok(temporary_channel_id)
+    }
+}
+
+fn get_min_funding_amount(token: &TokenType, node: &NodeInfo) -> Option<u128> {
+    match token {
+        TokenType::Ckb => Some(node.auto_accept_min_ckb_funding_amount as u128),
+        TokenType::Udt { .. } => node.udt_cfg_infos.0.iter().find_map(|cfg| {
+            if token.is_token(Some(conv!(&cfg.script))) {
+                cfg.auto_accept_amount
+            } else {
+                None
+            }
+        }),
     }
 }

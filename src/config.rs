@@ -1,3 +1,4 @@
+use ckb_jsonrpc_types::Script;
 use fnn::{fiber::serde_utils::U128Hex, rpc::peer::MultiAddr};
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
@@ -48,9 +49,35 @@ impl Default for HeuristicConfig {
     }
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone)]
+#[serde(tag = "type")]
+pub enum TokenType {
+    Ckb,
+    Udt { name: String, script: Script },
+}
+
+impl TokenType {
+    pub fn name(&self) -> &str {
+        match self {
+            Self::Ckb => "ckb",
+            Self::Udt { name, .. } => name,
+        }
+    }
+
+    pub fn is_token(&self, script: Option<Script>) -> bool {
+        match (self, script) {
+            (Self::Ckb, None) => true,
+            (Self::Udt { script, .. }, Some(udt)) => script == &udt,
+            (Self::Ckb, Some(_)) | (Self::Udt { .. }, None) => false,
+        }
+    }
+}
+
 #[serde_as]
 #[derive(Serialize, Deserialize)]
 pub struct AgentConfig {
+    /// Set token type
+    pub token: TokenType,
     /// Open channals to external nodes without scoring
     pub external_nodes: Vec<MultiAddr>,
     /// Max channels

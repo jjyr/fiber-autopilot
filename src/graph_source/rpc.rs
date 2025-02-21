@@ -3,7 +3,7 @@ use std::future::Future;
 use anyhow::Result;
 use ckb_jsonrpc_types::Script;
 use ckb_sdk::{
-    rpc::ckb_indexer::{ScriptType, SearchKey, SearchMode},
+    rpc::ckb_indexer::{Order, ScriptType, SearchKey, SearchKeyFilter, SearchMode},
     CkbRpcAsyncClient,
 };
 use fnn::{
@@ -16,7 +16,7 @@ use fnn::{
     },
 };
 
-use crate::{rpc::client::RPCClient, traits::GraphSource};
+use crate::{config::TokenType, rpc::client::RPCClient, traits::GraphSource};
 
 #[derive(Clone)]
 pub struct RPCGraphSource {
@@ -102,20 +102,75 @@ impl GraphSource for RPCGraphSource {
         }
     }
 
-    fn get_balance(&self, lock: Script) -> impl Future<Output = Result<u128>> + Send {
+    fn get_balance(
+        &self,
+        lock: Script,
+        token: TokenType,
+    ) -> impl Future<Output = Result<u128>> + Send {
         async {
-            let search_key = SearchKey {
-                script: lock,
-                script_type: ScriptType::Lock,
-                script_search_mode: Some(SearchMode::Exact),
-                filter: None,
-                with_data: None,
-                group_by_transaction: None,
-            };
-            let source = self.clone();
-            let r = source.ckb_client.get_cells_capacity(search_key).await?;
-            let capacity = r.map(|cell| cell.capacity.value()).unwrap_or_default();
-            Ok(capacity.into())
+            match token {
+                TokenType::Ckb => {
+                    let search_key = SearchKey {
+                        script: lock,
+                        script_type: ScriptType::Lock,
+                        script_search_mode: Some(SearchMode::Exact),
+                        filter: Some(SearchKeyFilter {
+                            script: None,
+                            script_len_range: Some([0u64.into(), 1u64.into()]),
+                            output_data: None,
+                            output_data_len_range: Some([0u64.into(), 1u64.into()]),
+                            output_data_filter_mode: None,
+                            output_capacity_range: None,
+                            block_range: None,
+                        }),
+                        with_data: None,
+                        group_by_transaction: None,
+                    };
+                    let source = self.clone();
+                    let r = source.ckb_client.get_cells_capacity(search_key).await?;
+                    let capacity = r.map(|cell| cell.capacity.value()).unwrap_or_default();
+                    Ok(capacity.into())
+                }
+                TokenType::Udt { name: _, script } => {
+                    let search_key = SearchKey {
+                        script: lock,
+                        script_type: ScriptType::Lock,
+                        script_search_mode: Some(SearchMode::Exact),
+                        filter: Some(SearchKeyFilter {
+                            script: Some(script),
+                            script_len_range: None,
+                            output_data: None,
+                            output_data_len_range: Some([16u64.into(), u64::MAX.into()]),
+                            output_data_filter_mode: None,
+                            output_capacity_range: None,
+                            block_range: None,
+                        }),
+                        with_data: Some(true),
+                        group_by_transaction: None,
+                    };
+                    let source = self.clone();
+                    // TODO: handle paginate
+                    let r = source
+                        .ckb_client
+                        .get_cells(search_key, Order::Desc, 1000u32.into(), None)
+                        .await?;
+                    let capacity = r
+                        .objects
+                        .iter()
+                        .filter_map(|cell| {
+                            let data = cell.output_data.as_ref()?.as_bytes();
+                            if data.len() > 16 {
+                                let buf: [u8; 16] = data[..16].try_into().ok()?;
+                                let amount = u128::from_le_bytes(buf);
+                                Some(amount)
+                            } else {
+                                None
+                            }
+                        })
+                        .sum::<u128>();
+                    Ok(capacity)
+                }
+            }
         }
     }
 }

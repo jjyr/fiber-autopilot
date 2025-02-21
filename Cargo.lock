@@ -1948,7 +1948,7 @@ dependencies = [
 [[package]]
 name = "fnn"
 version = "0.3.1"
-source = "git+https://github.com/jjyr/fiber.git?rev=120ac811e3da598d7db69a317ed5da9c958c3bbd#120ac811e3da598d7db69a317ed5da9c958c3bbd"
+source = "git+https://github.com/jjyr/fiber.git?rev=745736da68b38999deae75d40c1fdd291d3b0b61#745736da68b38999deae75d40c1fdd291d3b0b61"
 dependencies = [
  "anyhow",
  "arcode",

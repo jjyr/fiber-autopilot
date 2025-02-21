@@ -13,7 +13,7 @@ serde_json = "1.0.138"
 tokio = { version = "1.43.0", features = ["macros", "rt-multi-thread"] }
 toml = "0.8.20"
 # public RPC
-fnn = { git = "https://github.com/jjyr/fiber.git", rev = "120ac811e3da598d7db69a317ed5da9c958c3bbd" }
+fnn = { git = "https://github.com/jjyr/fiber.git", rev = "745736da68b38999deae75d40c1fdd291d3b0b61" }
 ractor = "=0.14.2"
 env_logger = "0.11.6"
 jsonrpsee = { version = "0.24.8", features = [
