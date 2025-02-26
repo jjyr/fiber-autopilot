@@ -6,9 +6,6 @@ url = "https://testnet.ckb.dev"
 token.type = "Ckb"
 # Autopilot agent gives external node with highest scores
 external_nodes = []
-# Total available funds
-# 10000 CKB
-available_funds = "0xE8D4A51000"
 interval = 15
 max_chan_num = 100
 max_pending = 20
