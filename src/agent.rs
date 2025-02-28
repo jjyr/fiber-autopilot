@@ -20,16 +20,8 @@ use crate::{
     config::{AgentConfig, TokenType},
     graph::Graph,
     traits::GraphSource,
-    utils::{choice_n, get_peer_id_from_addr},
+    utils::{choice_n, conv, get_peer_id_from_addr},
 };
-
-// TODO: Remove after upgrade ckb_json_type to the same version
-macro_rules! conv {
-    ( $x:expr ) => {{
-        let v = serde_json::to_value($x).expect("conv");
-        serde_json::from_value(v).expect("conv")
-    }};
-}
 
 #[derive(Debug, Clone)]
 struct OpenChannelCmd {

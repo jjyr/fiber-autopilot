@@ -3,6 +3,22 @@ use std::str::FromStr;
 use fnn::rpc::peer::{MultiAddr, PeerId};
 use rand::distr::{weighted::WeightedIndex, Distribution};
 
+// TODO: Remove after upgrade ckb_json_type to the same version
+macro_rules! conv {
+    ( $x:expr ) => {{
+        let v = serde_json::to_value($x).expect("conv");
+        serde_json::from_value(v).expect("conv")
+    }};
+}
+
+pub(crate) use conv;
+
+// TODO: Remove after upgrade ckb_gen_types to the same version
+pub fn to_fiber<T: ckb_types::prelude::Entity, D: fiber_ckb_types::prelude::Entity>(x: T) -> D {
+    let v = x.as_slice();
+    D::from_slice(v).expect("to fiber ckb types")
+}
+
 pub fn choice_n<T: Clone>(items: Vec<(T, f64)>, n: usize) -> Vec<(T, f64)> {
     // return all items if less than n
     if items.len() < n {

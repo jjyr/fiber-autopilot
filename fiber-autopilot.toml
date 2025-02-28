@@ -1,7 +1,8 @@
-[fiber]
-url = "http://127.0.0.1:8227"
-[ckb]
-url = "https://testnet.ckb.dev"
+# [Rpc]
+# fiber.url = "http://127.0.0.1:8227"
+# ckb.url = "https://testnet.ckb.dev"
+[Mock]
+balance = "0x5AF3107A4000"
 [[agents]]
 token.type = "Ckb"
 # Autopilot agent gives external node with highest scores
