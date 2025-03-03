@@ -16,6 +16,7 @@ use rpc::client::RPCClient;
 use std::{fmt::Debug, fs};
 use tokio::task::JoinSet;
 use tracing::{error, info};
+use tracing_subscriber::EnvFilter;
 use traits::GraphSource;
 
 /// This is a simple program to demonstrate clap derive usage
@@ -36,7 +37,16 @@ struct Args {
 }
 
 fn init_log() {
-    tracing_subscriber::fmt().init();
+    if let Ok(level) = std::env::var("RUST_LOG") {
+        tracing_subscriber::fmt()
+            .with_env_filter(EnvFilter::new(format!(
+                "{}={level}",
+                env!("CARGO_PKG_NAME").replace("-", "_"),
+            )))
+            .init();
+    } else {
+        tracing_subscriber::fmt().init();
+    }
 }
 
 #[tokio::main]

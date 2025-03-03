@@ -1,9 +1,4 @@
-use std::{
-    fmt::Debug,
-    future::Future,
-    sync::Arc,
-    time::Instant,
-};
+use std::{fmt::Debug, future::Future, str::FromStr, sync::Arc, time::Instant};
 
 use anyhow::Result;
 use ckb_jsonrpc_types::{JsonBytes, Script, ScriptHashType};
@@ -105,14 +100,22 @@ impl State {
         self.nodes = graph_data
             .nodes
             .into_iter()
-            .map(|node| NodeInfo {
-                node_id: random_pubkey(),
-                node_name: format!("node-{}", node.id),
-                addresses: vec![],
-                chain_hash,
-                auto_accept_min_ckb_funding_amount: 0,
-                timestamp: 0,
-                udt_cfg_infos: udt_cfg_infos.clone(),
+            .map(|node| {
+                // random generate addresses
+                let address = MultiAddr::from_str(&format!(
+                    "/ip4/127.0.0.1/tcp/{}",
+                    rng.random_range(1000..65535)
+                ))
+                .unwrap();
+                NodeInfo {
+                    node_id: random_pubkey(),
+                    node_name: format!("node-{}", node.id),
+                    addresses: vec![address],
+                    chain_hash,
+                    auto_accept_min_ckb_funding_amount: 0,
+                    timestamp: 0,
+                    udt_cfg_infos: udt_cfg_infos.clone(),
+                }
             })
             .collect();
 

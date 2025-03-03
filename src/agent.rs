@@ -147,8 +147,19 @@ impl<GS: GraphSource + Send + Clone + Debug + 'static> Agent<GS> {
             .max_chan_num
             .saturating_sub(local_channels.len()))
         .min(20);
-        self.open_channels(available_funds, num, graph, local_channels)
-            .await
+        if num > 0 {
+            self.open_channels(available_funds, num, graph, local_channels)
+                .await
+        } else {
+            // output debug info
+            info!(
+                "Stop open channels, available_funds {} max_chan_num {} local_channels {}",
+                available_funds,
+                self.config.max_chan_num,
+                local_channels.len()
+            );
+            Ok(())
+        }
     }
 
     pub(crate) async fn open_channels(
