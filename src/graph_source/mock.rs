@@ -2,6 +2,7 @@ use std::{fmt::Debug, future::Future, str::FromStr, sync::Arc, time::Instant};
 
 use anyhow::Result;
 use ckb_jsonrpc_types::{JsonBytes, Script, ScriptHashType};
+use ckb_sdk::constants::ONE_CKB;
 use ckb_types::{
     packed::OutPoint,
     prelude::{hex_string, Pack},
@@ -131,7 +132,7 @@ impl State {
                 last_updated_timestamp_of_node2: None,
                 fee_rate_of_node1: None,
                 fee_rate_of_node2: None,
-                capacity: link.weight as u128,
+                capacity: (link.weight * ONE_CKB as f64) as u128,
                 chain_hash,
                 udt_type_script: None,
             })

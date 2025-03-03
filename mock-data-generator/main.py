@@ -3,19 +3,21 @@ from networkx.readwrite import json_graph
 import sys
 import json
 import random
+import numpy as np
 
 # define weight range
-ONE_CKB = 100000000
-WEIGHT_MIN = 0
-WEIGHT_MAX = 1_000_000 * ONE_CKB
+WEIGHT_MIN = 100
+WEIGHT_MAX = 1_000_000
 
 
 def main():
     # Generate a random graph
     G = nx.erdos_renyi_graph(100, 0.05)
-    # Generate a random weight for each edge
-    for edge in G.edges():
-        G[edge[0]][edge[1]]["weight"] = random.uniform(WEIGHT_MIN, WEIGHT_MAX)
+    # Generate a random weight with pareto distribution
+    rng = np.random.default_rng()
+    weights = rng.pareto(a=2.5, size=len(G.edges())) * WEIGHT_MIN
+    for edge, weight in zip(G.edges(), weights):
+        G[edge[0]][edge[1]]["weight"] = weight
     # Convert the graph to a JSON object
     data = json_graph.node_link_data(G, edges="links")
     # get path from args
