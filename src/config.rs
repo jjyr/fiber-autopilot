@@ -116,4 +116,7 @@ pub struct AgentConfig {
     pub max_chan_funds: u128,
     #[serde(default, flatten)]
     pub heuristics: HeuristicConfig,
+    /// Exit after reach maximum number of channels
+    #[serde(default)]
+    pub exit_after_max: bool,
 }

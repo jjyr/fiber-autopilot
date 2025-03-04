@@ -72,12 +72,17 @@ impl State {
             hash_type: ScriptHashType::Data,
             args: JsonBytes::from_vec(vec![]),
         });
+        let addresses = vec![MultiAddr::from_str(&format!(
+            "/ip4/127.0.0.1/tcp/{}",
+            rng.random_range(1000..65535)
+        ))
+        .unwrap()];
         let node_info = NodeInfoResult {
             version: "0.1.0".to_string(),
             commit_hash,
             node_id,
             node_name: Some("mock".to_string()),
-            addresses: vec![],
+            addresses,
             chain_hash: rng.random::<[u8; 32]>().into(),
             auto_accept_channel_ckb_funding_amount: 0,
             channel_count: 0,
@@ -98,32 +103,26 @@ impl State {
         let mut rng = rand::rng();
         let chain_hash = self.node_info.chain_hash;
         let udt_cfg_infos = self.node_info.udt_cfg_infos.clone();
-        self.nodes = graph_data
-            .nodes
-            .into_iter()
-            .map(|node| {
-                // random generate addresses
-                let address = MultiAddr::from_str(&format!(
-                    "/ip4/127.0.0.1/tcp/{}",
-                    rng.random_range(1000..65535)
-                ))
-                .unwrap();
-                NodeInfo {
-                    node_id: random_pubkey(),
-                    node_name: format!("node-{}", node.id),
-                    addresses: vec![address],
-                    chain_hash,
-                    auto_accept_min_ckb_funding_amount: 0,
-                    timestamp: 0,
-                    udt_cfg_infos: udt_cfg_infos.clone(),
-                }
-            })
-            .collect();
+        self.nodes.extend(graph_data.nodes.into_iter().map(|node| {
+            // random generate addresses
+            let address = MultiAddr::from_str(&format!(
+                "/ip4/127.0.0.1/tcp/{}",
+                rng.random_range(1000..65535)
+            ))
+            .unwrap();
+            NodeInfo {
+                node_id: random_pubkey(),
+                node_name: format!("node-{}", node.id),
+                addresses: vec![address],
+                chain_hash,
+                auto_accept_min_ckb_funding_amount: 0,
+                timestamp: 0,
+                udt_cfg_infos: udt_cfg_infos.clone(),
+            }
+        }));
 
-        self.channels = graph_data
-            .links
-            .into_iter()
-            .map(|link| ChannelInfo {
+        self.channels
+            .extend(graph_data.links.into_iter().map(|link| ChannelInfo {
                 channel_outpoint: to_fiber(OutPoint::new(rng.random::<[u8; 32]>().pack(), 0)),
                 node1: self.nodes[link.source].node_id,
                 node2: self.nodes[link.target].node_id,
@@ -135,38 +134,38 @@ impl State {
                 capacity: (link.weight * ONE_CKB as f64) as u128,
                 chain_hash,
                 udt_type_script: None,
-            })
-            .collect();
+            }));
 
         // Find channels where one of the nodes is self
-        self.local_channels = self
-            .channels
-            .iter()
-            .filter(|channel| {
-                channel.node1 == self.node_info.node_id || channel.node2 == self.node_info.node_id
-            })
-            .map(|channel| {
-                let peer_id = if channel.node1 == self.node_info.node_id {
-                    PeerId::from_public_key(&channel.node2.into())
-                } else {
-                    PeerId::from_public_key(&channel.node1.into())
-                };
-                Channel {
-                    peer_id,
-                    channel_id: rand::rng().random::<[u8; 32]>().into(),
-                    is_public: true,
-                    channel_outpoint: Some(channel.channel_outpoint.clone()),
-                    funding_udt_type_script: channel.udt_type_script.clone(),
-                    state: ChannelState::ChannelReady(),
-                    local_balance: channel.capacity / 2,
-                    remote_balance: channel.capacity / 2,
-                    created_at: channel.created_timestamp,
-                    latest_commitment_transaction_hash: None,
-                    offered_tlc_balance: 0,
-                    received_tlc_balance: 0,
-                }
-            })
-            .collect();
+        self.local_channels.extend(
+            self.channels
+                .iter()
+                .filter(|channel| {
+                    channel.node1 == self.node_info.node_id
+                        || channel.node2 == self.node_info.node_id
+                })
+                .map(|channel| {
+                    let peer_id = if channel.node1 == self.node_info.node_id {
+                        PeerId::from_public_key(&channel.node2.into())
+                    } else {
+                        PeerId::from_public_key(&channel.node1.into())
+                    };
+                    Channel {
+                        peer_id,
+                        channel_id: rand::rng().random::<[u8; 32]>().into(),
+                        is_public: true,
+                        channel_outpoint: Some(channel.channel_outpoint.clone()),
+                        funding_udt_type_script: channel.udt_type_script.clone(),
+                        state: ChannelState::ChannelReady(),
+                        local_balance: channel.capacity / 2,
+                        remote_balance: channel.capacity / 2,
+                        created_at: channel.created_timestamp,
+                        latest_commitment_transaction_hash: None,
+                        offered_tlc_balance: 0,
+                        received_tlc_balance: 0,
+                    }
+                }),
+        );
 
         // Update node info with local channels
         self.node_info.channel_count = self.local_channels.len() as u32;

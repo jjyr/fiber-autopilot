@@ -92,6 +92,45 @@ impl<GS: GraphSource + Send + Clone + Debug + 'static> Agent<GS> {
             }
             let interval = Duration::from_secs(self.config.interval);
             tokio::time::sleep(interval).await;
+
+            // exit after reach maximum number of channels
+            if self.config.exit_after_max {
+                let local_channels = self
+                    .source
+                    .local_channels()
+                    .await
+                    .expect("get local channels");
+                if local_channels.len() >= self.config.max_chan_num {
+                    info!("Reach maximum number of channels, exit...");
+                    // output self node channels count
+                    info!("local channels count {}", local_channels.len());
+                    // output self node scores
+                    let nodes = self.source.graph_nodes().await.expect("get graph nodes");
+                    assert!(nodes.iter().any(|n| n.node_id == self.self_id));
+                    let channels = self
+                        .source
+                        .graph_channels()
+                        .await
+                        .expect("get graph channels");
+                    let graph = Arc::new(Graph::build(nodes, channels));
+                    let self_id = PeerId::from_public_key(&self.self_id.into());
+                    let scores = crate::heuristics::get_node_scores(
+                        &self.config.heuristics,
+                        graph.clone(),
+                        [self_id].into_iter().collect(),
+                    )
+                    .await
+                    .expect("get node scores");
+                    for (node, score) in scores {
+                        info!("Node {:?} score {}", node, score);
+                    }
+                    // output network nodes count
+                    info!("network nodes count {}", graph.nodes().len());
+                    // output network channels count
+                    info!("network channels count {}", graph.channels().len());
+                    break;
+                }
+            }
         }
     }
 
@@ -177,7 +216,7 @@ impl<GS: GraphSource + Send + Clone + Debug + 'static> Agent<GS> {
         // check connected pending channels
         for c in local_channels.iter() {
             if self.pending.remove(&c.peer_id) {
-                info!(
+                debug!(
                     "Successfully open channel {:?} {:?} with {:?} funds {} {}",
                     c.channel_id,
                     c.channel_outpoint,
@@ -355,7 +394,7 @@ impl<GS: GraphSource + Send + Clone + Debug + 'static> Agent<GS> {
             } = cmd;
             match handle.await {
                 Ok(Ok(temp_channel_id)) => {
-                    info!("Initial open channel {temp_channel_id:?} with {peer:?} {addresses:?} funds {funds} {}",token.name());
+                    debug!("Initial open channel {temp_channel_id:?} with {peer:?} {addresses:?} funds {funds} {}",token.name());
                     // We must wait for peer to accept the channel
                 }
                 Ok(Err(err)) => {

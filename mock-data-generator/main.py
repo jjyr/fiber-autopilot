@@ -8,11 +8,12 @@ import numpy as np
 # define weight range
 WEIGHT_MIN = 100
 WEIGHT_MAX = 1_000_000
+NODES = 1000
 
 
 def main():
     # Generate a random graph
-    G = nx.erdos_renyi_graph(100, 0.05)
+    G = nx.barabasi_albert_graph(NODES, 2)
     # Generate a random weight with pareto distribution
     rng = np.random.default_rng()
     weights = rng.pareto(a=2.5, size=len(G.edges())) * WEIGHT_MIN
