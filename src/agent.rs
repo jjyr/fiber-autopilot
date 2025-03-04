@@ -90,8 +90,11 @@ impl<GS: GraphSource + Send + Clone + Debug + 'static> Agent<GS> {
             if let Err(err) = self.run_once().await {
                 error!("Run once {err:?}");
             }
-            let interval = Duration::from_secs(self.config.interval);
-            tokio::time::sleep(interval).await;
+
+            if self.config.interval > 0 {
+                let interval = Duration::from_secs(self.config.interval);
+                tokio::time::sleep(interval).await;
+            }
 
             // exit after reach maximum number of channels
             if self.config.exit_after_max {
@@ -425,9 +428,6 @@ impl<GS: GraphSource + Send + Clone + Debug + 'static> Agent<GS> {
             .ok_or_else(|| anyhow!("No address"))?;
 
         source.connect_peer(address).await.context("connect peer")?;
-
-        // wait
-        tokio::time::sleep(Duration::from_secs(3)).await;
 
         let funding_udt_type_script = match token {
             TokenType::Ckb => None,

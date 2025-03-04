@@ -1,4 +1,4 @@
-use std::{fmt::Debug, future::Future};
+use std::{fmt::Debug, future::Future, time::Duration};
 
 use anyhow::Result;
 use ckb_jsonrpc_types::Script;
@@ -90,7 +90,11 @@ impl GraphSource for RPCGraphSource {
                     address: addr,
                     save: Some(true),
                 })
-                .await
+                .await?;
+
+            // wait
+            tokio::time::sleep(Duration::from_secs(3)).await;
+            Ok(())
         }
     }
 
